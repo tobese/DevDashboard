@@ -134,6 +134,112 @@ app.MapGet("/api/nuget-cache", () =>
     }
 });
 
+// ── API: Java info ──────────────────────────────────────────────────
+
+app.MapGet("/api/java-info", async () =>
+{
+    string? javaVersion = null;
+    string? javacVersion = null;
+    string? mavenVersion = null;
+    string? gradleVersion = null;
+    string? javaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
+
+    try { javaVersion = (await RunCommand("java", "--version")).Split('\n')[0].Trim(); } catch { }
+    try { javacVersion = (await RunCommand("javac", "--version")).Trim(); } catch { }
+    try { mavenVersion = (await RunCommand("mvn", "--version")).Split('\n')[0].Trim(); } catch { }
+    try
+    {
+        var gOutput = await RunCommand("gradle", "--version");
+        gradleVersion = gOutput.Split('\n').FirstOrDefault(l => l.TrimStart().StartsWith("Gradle "))?.Trim();
+    }
+    catch { }
+
+    var jvms = new List<string>();
+    var jvmRoot = "/Library/Java/JavaVirtualMachines";
+    if (Directory.Exists(jvmRoot))
+    {
+        jvms = [.. Directory.GetDirectories(jvmRoot)
+            .Select(Path.GetFileName)
+            .Where(n => n != null)
+            .Select(n => n!)
+            .OrderDescending()];
+    }
+
+    return Results.Ok(new
+    {
+        javaVersion,
+        javacVersion,
+        mavenVersion,
+        gradleVersion,
+        javaHome = javaHome ?? "not set",
+        javaPath = Which("java"),
+        javacPath = Which("javac"),
+        jvms,
+        timestamp = DateTime.UtcNow
+    });
+});
+
+// ── API: Android info ─────────────────────────────────────────────────
+
+app.MapGet("/api/android-info", async () =>
+{
+    var androidHome = Environment.GetEnvironmentVariable("ANDROID_HOME")
+                   ?? Environment.GetEnvironmentVariable("ANDROID_SDK_ROOT");
+
+    string? adbVersion = null;
+    try { adbVersion = (await RunCommand("adb", "version")).Split('\n')[0].Trim(); } catch { }
+
+    var platforms = new List<string>();
+    var buildTools = new List<string>();
+    var avds = new List<string>();
+
+    if (!string.IsNullOrEmpty(androidHome))
+    {
+        var platformsPath = Path.Combine(androidHome, "platforms");
+        if (Directory.Exists(platformsPath))
+        {
+            platforms = [.. Directory.GetDirectories(platformsPath)
+                .Select(Path.GetFileName)
+                .Where(n => n != null)
+                .Select(n => n!)
+                .OrderDescending()];
+        }
+
+        var buildToolsPath = Path.Combine(androidHome, "build-tools");
+        if (Directory.Exists(buildToolsPath))
+        {
+            buildTools = [.. Directory.GetDirectories(buildToolsPath)
+                .Select(Path.GetFileName)
+                .Where(n => n != null)
+                .Select(n => n!)
+                .OrderDescending()];
+        }
+    }
+
+    try
+    {
+        var avdOutput = await RunCommand("emulator", "-list-avds");
+        avds = [.. avdOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrEmpty(s))];
+    }
+    catch { }
+
+    return Results.Ok(new
+    {
+        androidHome = androidHome ?? "not set",
+        adbVersion,
+        adbPath = Which("adb"),
+        platformCount = platforms.Count,
+        buildToolsCount = buildTools.Count,
+        avdCount = avds.Count,
+        platforms,
+        buildTools,
+        avds,
+        timestamp = DateTime.UtcNow
+    });
+});
+
 // ── API: System info ─────────────────────────────────────────────────
 
 app.MapGet("/api/system-info", async () =>

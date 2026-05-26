@@ -186,6 +186,8 @@
         <div class="tab" data-panel="npm" onclick="switchTab(this)">npm Global <span class="badge" id="badge-npm">—</span></div>
         <div class="tab" data-panel="dotnet" onclick="switchTab(this)">dotnet Tools <span class="badge" id="badge-dotnet">—</span></div>
         <div class="tab" data-panel="nuget" onclick="switchTab(this)">NuGet Cache <span class="badge" id="badge-nuget">—</span></div>
+        <div class="tab" data-panel="java" onclick="switchTab(this)">Java <span class="badge" id="badge-java">—</span></div>
+        <div class="tab" data-panel="android" onclick="switchTab(this)">Android <span class="badge" id="badge-android">—</span></div>
     </div>
 
     <main>
@@ -219,6 +221,16 @@
                 <span class="count" id="count-nuget"></span>
             </div>
             <div id="nuget-content"><div class="status"><span class="spinner"></span>Loading NuGet cache…</div></div>
+        </div>
+
+        <!-- Java Panel -->
+        <div class="panel" id="panel-java">
+            <div id="java-content"><div class="status"><span class="spinner"></span>Loading Java info…</div></div>
+        </div>
+
+        <!-- Android Panel -->
+        <div class="panel" id="panel-android">
+            <div id="android-content"><div class="status"><span class="spinner"></span>Loading Android info…</div></div>
         </div>
     </main>
 
@@ -379,18 +391,100 @@
             }
         }
 
+        async function loadJava() {
+            try {
+                const data = await fetchJSON('/api/java-info');
+                const cards = [
+                    { label: 'Java', value: data.javaVersion || 'not found' },
+                    { label: 'javac', value: data.javacVersion || 'not found' },
+                    { label: 'Maven', value: data.mavenVersion || 'not found' },
+                    { label: 'Gradle', value: data.gradleVersion || 'not found' },
+                    { label: 'JAVA_HOME', value: data.javaHome },
+                    { label: 'java Path', value: data.javaPath || '—' },
+                    { label: 'javac Path', value: data.javacPath || '—' },
+                ];
+                let html = '<div class="info-grid">';
+                cards.forEach(c => {
+                    html += `<div class="info-card"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`;
+                });
+                html += '</div>';
+
+                if (data.jvms && data.jvms.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Installed JVMs</h3>';
+                    html += '<table id="table-java"><thead><tr><th>JVM</th></tr></thead><tbody>';
+                    data.jvms.forEach(jvm => { html += `<tr><td>${jvm}</td></tr>`; });
+                    html += '</tbody></table>';
+                }
+
+                document.getElementById('java-content').innerHTML = html;
+                document.getElementById('badge-java').textContent = data.jvms.length > 0 ? data.jvms.length : '✓';
+            } catch (e) {
+                document.getElementById('java-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+                document.getElementById('badge-java').textContent = '!';
+            }
+        }
+
+        async function loadAndroid() {
+            try {
+                const data = await fetchJSON('/api/android-info');
+                const cards = [
+                    { label: 'ANDROID_HOME', value: data.androidHome },
+                    { label: 'ADB', value: data.adbVersion || 'not found' },
+                    { label: 'adb Path', value: data.adbPath || '—' },
+                    { label: 'SDK Platforms', value: data.platformCount + ' installed' },
+                    { label: 'Build Tools', value: data.buildToolsCount + ' installed' },
+                    { label: 'AVDs', value: data.avdCount + ' emulators' },
+                ];
+                let html = '<div class="info-grid">';
+                cards.forEach(c => {
+                    html += `<div class="info-card"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`;
+                });
+                html += '</div>';
+
+                if (data.platforms && data.platforms.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">SDK Platforms</h3>';
+                    html += '<table><thead><tr><th>Platform</th></tr></thead><tbody>';
+                    data.platforms.forEach(p => { html += `<tr><td>${p}</td></tr>`; });
+                    html += '</tbody></table>';
+                }
+
+                if (data.buildTools && data.buildTools.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Build Tools</h3>';
+                    html += '<table><thead><tr><th>Version</th></tr></thead><tbody>';
+                    data.buildTools.forEach(bt => { html += `<tr><td class="version">${bt}</td></tr>`; });
+                    html += '</tbody></table>';
+                }
+
+                if (data.avds && data.avds.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Android Emulators (AVDs)</h3>';
+                    html += '<table><thead><tr><th>AVD Name</th></tr></thead><tbody>';
+                    data.avds.forEach(avd => { html += `<tr><td class="name">${avd}</td></tr>`; });
+                    html += '</tbody></table>';
+                }
+
+                document.getElementById('android-content').innerHTML = html;
+                const total = data.platformCount + data.buildToolsCount + data.avdCount;
+                document.getElementById('badge-android').textContent = total > 0 ? total : '✓';
+            } catch (e) {
+                document.getElementById('android-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+                document.getElementById('badge-android').textContent = '!';
+            }
+        }
+
         function refreshAll() {
             // Reset to loading state
-            ['system-content', 'npm-content', 'dotnet-content', 'nuget-content'].forEach(id => {
+            ['system-content', 'npm-content', 'dotnet-content', 'nuget-content', 'java-content', 'android-content'].forEach(id => {
                 document.getElementById(id).innerHTML = '<div class="status"><span class="spinner"></span>Loading…</div>';
             });
-            ['badge-system', 'badge-npm', 'badge-dotnet', 'badge-nuget'].forEach(id => {
+            ['badge-system', 'badge-npm', 'badge-dotnet', 'badge-nuget', 'badge-java', 'badge-android'].forEach(id => {
                 document.getElementById(id).textContent = '…';
             });
             loadSystem();
             loadNpm();
             loadDotnet();
             loadNuget();
+            loadJava();
+            loadAndroid();
             document.getElementById('lastRefresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
         }
 
