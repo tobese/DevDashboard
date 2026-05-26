@@ -188,6 +188,9 @@
         <div class="tab" data-panel="nuget" onclick="switchTab(this)">NuGet Cache <span class="badge" id="badge-nuget">—</span></div>
         <div class="tab" data-panel="java" onclick="switchTab(this)">Java <span class="badge" id="badge-java">—</span></div>
         <div class="tab" data-panel="android" onclick="switchTab(this)">Android <span class="badge" id="badge-android">—</span></div>
+        <div class="tab" data-panel="ios" onclick="switchTab(this)">iOS <span class="badge" id="badge-ios">—</span></div>
+        <div class="tab" data-panel="docker" onclick="switchTab(this)">Docker <span class="badge" id="badge-docker">—</span></div>
+        <div class="tab" data-panel="k8s" onclick="switchTab(this)">Kubernetes <span class="badge" id="badge-k8s">—</span></div>
     </div>
 
     <main>
@@ -231,6 +234,21 @@
         <!-- Android Panel -->
         <div class="panel" id="panel-android">
             <div id="android-content"><div class="status"><span class="spinner"></span>Loading Android info…</div></div>
+        </div>
+
+        <!-- iOS Panel -->
+        <div class="panel" id="panel-ios">
+            <div id="ios-content"><div class="status"><span class="spinner"></span>Loading iOS info…</div></div>
+        </div>
+
+        <!-- Docker Panel -->
+        <div class="panel" id="panel-docker">
+            <div id="docker-content"><div class="status"><span class="spinner"></span>Loading Docker info…</div></div>
+        </div>
+
+        <!-- Kubernetes Panel -->
+        <div class="panel" id="panel-k8s">
+            <div id="k8s-content"><div class="status"><span class="spinner"></span>Loading Kubernetes info…</div></div>
         </div>
     </main>
 
@@ -471,12 +489,162 @@
             }
         }
 
+        async function loadIos() {
+            try {
+                const data = await fetchJSON('/api/ios-info');
+                const cards = [
+                    { label: 'Xcode', value: data.xcodeVersion || 'not found' },
+                    { label: 'Swift', value: data.swiftVersion || 'not found' },
+                    { label: 'CocoaPods', value: data.cocoaPodsVersion || 'not found' },
+                    { label: 'Fastlane', value: data.fastlaneVersion || 'not found' },
+                    { label: 'Xcode Path', value: data.xcodePath || '—' },
+                    { label: 'SDKs', value: data.sdkCount + ' installed' },
+                    { label: 'Simulators', value: data.simulatorCount + ' available' },
+                ];
+                let html = '<div class="info-grid">';
+                cards.forEach(c => { html += `<div class="info-card"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`; });
+                html += '</div>';
+
+                if (data.sdks && data.sdks.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Installed SDKs</h3>';
+                    html += '<table><thead><tr><th>SDK Name</th><th>Identifier</th></tr></thead><tbody>';
+                    data.sdks.forEach(s => { html += `<tr><td class="name">${s.name}</td><td class="version">${s.sdk}</td></tr>`; });
+                    html += '</tbody></table>';
+                }
+
+                if (data.simulators && data.simulators.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">iOS Simulators</h3>';
+                    html += '<table id="table-ios-sims"><thead><tr>';
+                    html += '<th onclick="sortTable(\'table-ios-sims\',0)">Name</th>';
+                    html += '<th onclick="sortTable(\'table-ios-sims\',1)">Runtime</th>';
+                    html += '<th onclick="sortTable(\'table-ios-sims\',2)">State</th>';
+                    html += '</tr></thead><tbody>';
+                    data.simulators.forEach(sim => {
+                        const sc = sim.state === 'Booted' ? 'color:var(--green)' : 'color:var(--muted)';
+                        html += `<tr><td class="name">${sim.name}</td><td>${sim.runtime}</td><td style="${sc}">${sim.state}</td></tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                document.getElementById('ios-content').innerHTML = html;
+                document.getElementById('badge-ios').textContent = data.simulatorCount > 0 ? data.simulatorCount : '✓';
+            } catch (e) {
+                document.getElementById('ios-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+                document.getElementById('badge-ios').textContent = '!';
+            }
+        }
+
+        async function loadDocker() {
+            try {
+                const data = await fetchJSON('/api/docker-info');
+                const cards = [
+                    { label: 'Docker', value: data.dockerVersion || 'not found' },
+                    { label: 'Compose', value: data.composeVersion || 'not found' },
+                    { label: 'Context', value: data.currentContext || '—' },
+                    { label: 'Docker Path', value: data.dockerPath || '—' },
+                    { label: 'Containers', value: `${data.runningCount} running / ${data.containerCount} total` },
+                    { label: 'Images', value: data.imageCount + ' local' },
+                ];
+                let html = '<div class="info-grid">';
+                cards.forEach(c => { html += `<div class="info-card"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`; });
+                html += '</div>';
+
+                if (data.containers && data.containers.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Containers</h3>';
+                    html += '<table id="table-docker-ctr"><thead><tr>';
+                    html += '<th onclick="sortTable(\'table-docker-ctr\',0)">Name</th>';
+                    html += '<th onclick="sortTable(\'table-docker-ctr\',1)">Image</th>';
+                    html += '<th onclick="sortTable(\'table-docker-ctr\',2)">Status</th>';
+                    html += '<th onclick="sortTable(\'table-docker-ctr\',3)">Ports</th>';
+                    html += '</tr></thead><tbody>';
+                    data.containers.forEach(c => {
+                        const sc = c.state === 'running' ? 'color:var(--green)' : 'color:var(--muted)';
+                        const ports = c.ports || '—';
+                        html += `<tr><td class="name">${c.name||'—'}</td><td>${c.image||'—'}</td><td style="${sc}">${c.status||'—'}</td><td style="font-family:monospace;font-size:12px">${ports}</td></tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                if (data.images && data.images.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Images</h3>';
+                    html += '<table id="table-docker-img"><thead><tr>';
+                    html += '<th onclick="sortTable(\'table-docker-img\',0)">Repository</th>';
+                    html += '<th onclick="sortTable(\'table-docker-img\',1)">Tag</th>';
+                    html += '<th onclick="sortTable(\'table-docker-img\',2)">Size</th>';
+                    html += '<th onclick="sortTable(\'table-docker-img\',3)">Created</th>';
+                    html += '</tr></thead><tbody>';
+                    data.images.forEach(img => {
+                        html += `<tr><td class="name">${img.repository||'&lt;none&gt;'}</td><td class="version">${img.tag||'&lt;none&gt;'}</td><td>${img.size||'—'}</td><td style="color:var(--muted)">${img.created||'—'}</td></tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                document.getElementById('docker-content').innerHTML = html;
+                document.getElementById('badge-docker').textContent = data.runningCount > 0 ? data.runningCount : (data.containerCount > 0 ? data.containerCount : '✓');
+            } catch (e) {
+                document.getElementById('docker-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+                document.getElementById('badge-docker').textContent = '!';
+            }
+        }
+
+        async function loadK8s() {
+            try {
+                const data = await fetchJSON('/api/k8s-info');
+                const cards = [
+                    { label: 'kubectl', value: data.clientVersion || 'not found' },
+                    { label: 'Current Context', value: data.currentContext || 'none' },
+                    { label: 'kubectl Path', value: data.kubectlPath || '—' },
+                    { label: 'Contexts', value: data.contextCount + ' configured' },
+                    { label: 'Nodes', value: data.nodeCount > 0 ? data.nodeCount + ' in cluster' : 'unreachable' },
+                ];
+                let html = '<div class="info-grid">';
+                cards.forEach(c => { html += `<div class="info-card"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`; });
+                html += '</div>';
+
+                if (data.contexts && data.contexts.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Contexts</h3>';
+                    html += '<table id="table-k8s-ctx"><thead><tr>';
+                    html += '<th onclick="sortTable(\'table-k8s-ctx\',0)">Name</th>';
+                    html += '<th onclick="sortTable(\'table-k8s-ctx\',1)">Cluster</th>';
+                    html += '<th onclick="sortTable(\'table-k8s-ctx\',2)">Namespace</th>';
+                    html += '</tr></thead><tbody>';
+                    data.contexts.forEach(ctx => {
+                        const ns = ctx.isCurrent ? 'font-weight:600;color:var(--accent)' : '';
+                        const marker = ctx.isCurrent ? '● ' : '';
+                        html += `<tr><td style="${ns}">${marker}${ctx.name}</td><td>${ctx.cluster||'—'}</td><td style="color:var(--muted)">${ctx.ns||'default'}</td></tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                if (data.nodes && data.nodes.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Nodes</h3>';
+                    html += '<table id="table-k8s-nodes"><thead><tr>';
+                    html += '<th onclick="sortTable(\'table-k8s-nodes\',0)">Name</th>';
+                    html += '<th onclick="sortTable(\'table-k8s-nodes\',1)">Status</th>';
+                    html += '<th onclick="sortTable(\'table-k8s-nodes\',2)">Roles</th>';
+                    html += '<th onclick="sortTable(\'table-k8s-nodes\',3)">Version</th>';
+                    html += '</tr></thead><tbody>';
+                    data.nodes.forEach(node => {
+                        const sc = node.status === 'Ready' ? 'color:var(--green)' : 'color:var(--red)';
+                        html += `<tr><td class="name">${node.name}</td><td style="${sc}">${node.status}</td><td style="color:var(--muted)">${node.roles}</td><td class="version">${node.version}</td></tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                document.getElementById('k8s-content').innerHTML = html;
+                document.getElementById('badge-k8s').textContent = data.contextCount > 0 ? data.contextCount : '✓';
+            } catch (e) {
+                document.getElementById('k8s-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+                document.getElementById('badge-k8s').textContent = '!';
+            }
+        }
+
         function refreshAll() {
             // Reset to loading state
-            ['system-content', 'npm-content', 'dotnet-content', 'nuget-content', 'java-content', 'android-content'].forEach(id => {
+            ['system-content', 'npm-content', 'dotnet-content', 'nuget-content', 'java-content', 'android-content', 'ios-content', 'docker-content', 'k8s-content'].forEach(id => {
                 document.getElementById(id).innerHTML = '<div class="status"><span class="spinner"></span>Loading…</div>';
             });
-            ['badge-system', 'badge-npm', 'badge-dotnet', 'badge-nuget', 'badge-java', 'badge-android'].forEach(id => {
+            ['badge-system', 'badge-npm', 'badge-dotnet', 'badge-nuget', 'badge-java', 'badge-android', 'badge-ios', 'badge-docker', 'badge-k8s'].forEach(id => {
                 document.getElementById(id).textContent = '…';
             });
             loadSystem();
@@ -485,6 +653,9 @@
             loadNuget();
             loadJava();
             loadAndroid();
+            loadIos();
+            loadDocker();
+            loadK8s();
             document.getElementById('lastRefresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
         }
 

@@ -27,9 +27,13 @@ static async Task<string> RunCommand(string command, string arguments)
     };
 
     process.Start();
-    var output = await process.StandardOutput.ReadToEndAsync();
-    await process.WaitForExitAsync();
-    return output;
+    // Read both streams concurrently to avoid deadlock when stderr buffer fills
+    var stdoutTask = process.StandardOutput.ReadToEndAsync();
+    var stderrTask = process.StandardError.ReadToEndAsync();
+    await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync());
+    var stdout = await stdoutTask;
+    // Fall back to stderr so tools that write version info there (e.g. swift) still work
+    return !string.IsNullOrWhiteSpace(stdout) ? stdout : await stderrTask;
 }
 
 static string Which(string command)
@@ -50,6 +54,31 @@ static string Which(string command)
         return p.ExitCode == 0 ? result.Split('\n')[0].Trim() : "";
     }
     catch { return ""; }
+}
+
+// ── Helper: run command with explicit argument list (avoids shell-escaping issues) ──
+
+static async Task<string> RunCommandArgs(string command, params string[] args)
+{
+    using var process = new Process
+    {
+        StartInfo = new ProcessStartInfo
+        {
+            FileName = command,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        }
+    };
+    foreach (var arg in args)
+        process.StartInfo.ArgumentList.Add(arg);
+    process.Start();
+    var stdoutTask = process.StandardOutput.ReadToEndAsync();
+    var stderrTask = process.StandardError.ReadToEndAsync();
+    await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync());
+    var stdout = await stdoutTask;
+    return !string.IsNullOrWhiteSpace(stdout) ? stdout : await stderrTask;
 }
 
 // ── API: Global npm packages ─────────────────────────────────────────
@@ -236,6 +265,210 @@ app.MapGet("/api/android-info", async () =>
         platforms,
         buildTools,
         avds,
+        timestamp = DateTime.UtcNow
+    });
+});
+
+// ── API: iOS info ────────────────────────────────────────────────────
+
+app.MapGet("/api/ios-info", async () =>
+{
+    string? xcodeVersion = null;
+    string? xcodePath = null;
+    string? swiftVersion = null;
+    string? cocoaPodsVersion = null;
+    string? fastlaneVersion = null;
+
+    try { xcodeVersion = (await RunCommand("xcodebuild", "-version")).Split('\n')[0].Trim(); } catch { }
+    try { xcodePath = (await RunCommand("xcode-select", "-p")).Trim(); } catch { }
+    try { swiftVersion = (await RunCommand("swift", "--version")).Split('\n')[0].Trim(); } catch { }
+    try { cocoaPodsVersion = (await RunCommand("pod", "--version")).Trim(); } catch { }
+    try
+    {
+        var flOutput = await RunCommand("fastlane", "--version");
+        fastlaneVersion = flOutput.Split('\n')
+            .Select(l => l.Trim())
+            .FirstOrDefault(l => l.StartsWith("fastlane ") && l.Length > 9 && char.IsDigit(l[9]));
+    }
+    catch { }
+
+    var sdks = new List<object>();
+    try
+    {
+        var sdkOutput = await RunCommand("xcodebuild", "-showsdks");
+        foreach (var line in sdkOutput.Split('\n'))
+        {
+            if (!line.Contains("-sdk")) continue;
+            var parts = line.Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2)
+                sdks.Add(new { name = parts[0].Trim(), sdk = parts[1].Replace("-sdk", "").Trim() });
+        }
+    }
+    catch { }
+
+    var simulators = new List<object>();
+    try
+    {
+        var simJson = await RunCommand("xcrun", "simctl list devices available --json");
+        using var simDoc = JsonDocument.Parse(simJson);
+        foreach (var runtime in simDoc.RootElement.GetProperty("devices").EnumerateObject())
+        {
+            if (!runtime.Name.Contains(".iOS-")) continue;
+            var runtimeLabel = "iOS " + runtime.Name.Split(".iOS-").Last().Replace("-", ".");
+            foreach (var device in runtime.Value.EnumerateArray())
+            {
+                var name = device.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                var state = device.TryGetProperty("state", out var s) ? s.GetString() ?? "" : "";
+                simulators.Add(new { name, runtime = runtimeLabel, state });
+            }
+        }
+    }
+    catch { }
+
+    return Results.Ok(new
+    {
+        xcodeVersion,
+        xcodePath,
+        swiftVersion,
+        cocoaPodsVersion,
+        fastlaneVersion,
+        sdkCount = sdks.Count,
+        simulatorCount = simulators.Count,
+        sdks,
+        simulators,
+        timestamp = DateTime.UtcNow
+    });
+});
+
+// ── API: Docker info ──────────────────────────────────────────────────
+
+app.MapGet("/api/docker-info", async () =>
+{
+    string? dockerVersion = null;
+    string? composeVersion = null;
+    string? currentContext = null;
+
+    try { dockerVersion = (await RunCommand("docker", "--version")).Trim(); } catch { }
+    try { composeVersion = (await RunCommand("docker", "compose version")).Split('\n')[0].Trim(); } catch { }
+    try { currentContext = (await RunCommand("docker", "context show")).Trim(); } catch { }
+
+    var containers = new List<object>();
+    var runningCount = 0;
+    try
+    {
+        var psOutput = await RunCommandArgs("docker", "ps", "-a", "--format", "{{json .}}");
+        foreach (var line in psOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                var name   = root.TryGetProperty("Names",  out var n)   ? n.GetString()   : null;
+                var image  = root.TryGetProperty("Image",  out var img) ? img.GetString() : null;
+                var state  = root.TryGetProperty("State",  out var st)  ? st.GetString()  : null;
+                var status = root.TryGetProperty("Status", out var sts) ? sts.GetString() : null;
+                var ports  = root.TryGetProperty("Ports",  out var p)   ? p.GetString()   : null;
+                if (state == "running") runningCount++;
+                containers.Add(new { name, image, state, status, ports });
+            }
+            catch { }
+        }
+    }
+    catch { }
+
+    var images = new List<object>();
+    try
+    {
+        var imgOutput = await RunCommandArgs("docker", "images", "--format", "{{json .}}");
+        foreach (var line in imgOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                var repo    = root.TryGetProperty("Repository",   out var r) ? r.GetString() : null;
+                var tag     = root.TryGetProperty("Tag",          out var t) ? t.GetString() : null;
+                var size    = root.TryGetProperty("Size",         out var s) ? s.GetString() : null;
+                var created = root.TryGetProperty("CreatedSince", out var c) ? c.GetString() : null;
+                images.Add(new { repository = repo, tag, size, created });
+            }
+            catch { }
+        }
+    }
+    catch { }
+
+    return Results.Ok(new
+    {
+        dockerVersion,
+        composeVersion,
+        currentContext,
+        dockerPath = Which("docker"),
+        containerCount = containers.Count,
+        runningCount,
+        imageCount = images.Count,
+        containers,
+        images,
+        timestamp = DateTime.UtcNow
+    });
+});
+
+// ── API: Kubernetes info ──────────────────────────────────────────────
+
+app.MapGet("/api/k8s-info", async () =>
+{
+    string? clientVersion = null;
+    string? currentContext = null;
+
+    try
+    {
+        var versionJson = await RunCommandArgs("kubectl", "version", "--client", "--output", "json");
+        using var vDoc = JsonDocument.Parse(versionJson);
+        clientVersion = vDoc.RootElement.GetProperty("clientVersion").GetProperty("gitVersion").GetString();
+    }
+    catch { }
+
+    try { currentContext = (await RunCommand("kubectl", "config current-context")).Trim(); } catch { }
+
+    var contexts = new List<object>();
+    try
+    {
+        var ctxOutput = await RunCommand("kubectl", "config get-contexts --no-headers");
+        foreach (var line in ctxOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var isCurrent = line.TrimStart().StartsWith("*");
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var offset = isCurrent ? 1 : 0;  // skip the '*' token
+            var name    = parts.Length > offset     ? parts[offset]     : "";
+            var cluster = parts.Length > offset + 1 ? parts[offset + 1] : "";
+            var ns      = parts.Length > offset + 3 ? parts[offset + 3] : "";
+            if (!string.IsNullOrEmpty(name))
+                contexts.Add(new { name, cluster, ns, isCurrent });
+        }
+    }
+    catch { }
+
+    var nodes = new List<object>();
+    try
+    {
+        var nodesOutput = await RunCommand("kubectl", "get nodes --no-headers");
+        foreach (var line in nodesOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 4)
+                nodes.Add(new { name = parts[0], status = parts[1], roles = parts[2], age = parts[3], version = parts.Length > 4 ? parts[4] : "" });
+        }
+    }
+    catch { }
+
+    return Results.Ok(new
+    {
+        clientVersion,
+        currentContext,
+        kubectlPath = Which("kubectl"),
+        contextCount = contexts.Count,
+        nodeCount = nodes.Count,
+        contexts,
+        nodes,
         timestamp = DateTime.UtcNow
     });
 });
