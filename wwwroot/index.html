@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dev Dashboard</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: #2a2d3a;
+            --text: #e1e4ed;
+            --muted: #8b8fa3;
+            --accent: #6c8cff;
+            --accent-dim: #3d5afe22;
+            --green: #4caf84;
+            --orange: #e8a838;
+            --red: #e05555;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+        }
+        header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        header h1 span { font-size: 20px; }
+        .header-actions { display: flex; align-items: center; gap: 12px; }
+        #lastRefresh { font-size: 12px; color: var(--muted); }
+        button {
+            padding: 6px 14px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.15s;
+        }
+        button:hover { border-color: var(--accent); background: var(--accent-dim); }
+        button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        button.primary:hover { opacity: 0.9; }
+
+        .tabs {
+            display: flex;
+            gap: 0;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+        }
+        .tab {
+            padding: 10px 18px;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--muted);
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+        .tab:hover { color: var(--text); }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .tab .badge {
+            display: inline-block;
+            min-width: 20px;
+            text-align: center;
+            padding: 1px 6px;
+            margin-left: 6px;
+            font-size: 11px;
+            border-radius: 10px;
+            background: var(--border);
+            color: var(--muted);
+        }
+        .tab.active .badge { background: var(--accent-dim); color: var(--accent); }
+
+        main { padding: 20px 24px; }
+
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        /* System info cards */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .info-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px 16px;
+        }
+        .info-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .info-card .value { font-size: 15px; margin-top: 4px; word-break: break-all; }
+
+        /* Search bar */
+        .search-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .search-bar input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg);
+            color: var(--text);
+            font-size: 13px;
+            outline: none;
+        }
+        .search-bar input:focus { border-color: var(--accent); }
+        .search-bar .count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--surface);
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+        th {
+            text-align: left;
+            padding: 10px 14px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: var(--bg);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+        }
+        th:hover { color: var(--text); }
+        td {
+            padding: 9px 14px;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #ffffff06; }
+        td.name { font-weight: 500; }
+        td.version { color: var(--green); font-family: 'SF Mono', Menlo, monospace; font-size: 12px; }
+
+        /* Loading / error */
+        .status {
+            text-align: center;
+            padding: 40px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 8px; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error { color: var(--red); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1><span>⚙️</span> Dev Dashboard</h1>
+        <div class="header-actions">
+            <span id="lastRefresh"></span>
+            <button class="primary" onclick="refreshAll()">↻ Refresh</button>
+        </div>
+    </header>
+
+    <div class="tabs">
+        <div class="tab active" data-panel="system" onclick="switchTab(this)">System <span class="badge" id="badge-system">—</span></div>
+        <div class="tab" data-panel="npm" onclick="switchTab(this)">npm Global <span class="badge" id="badge-npm">—</span></div>
+        <div class="tab" data-panel="dotnet" onclick="switchTab(this)">dotnet Tools <span class="badge" id="badge-dotnet">—</span></div>
+        <div class="tab" data-panel="nuget" onclick="switchTab(this)">NuGet Cache <span class="badge" id="badge-nuget">—</span></div>
+    </div>
+
+    <main>
+        <!-- System Info Panel -->
+        <div class="panel active" id="panel-system">
+            <div id="system-content"><div class="status"><span class="spinner"></span>Loading system info…</div></div>
+        </div>
+
+        <!-- npm Panel -->
+        <div class="panel" id="panel-npm">
+            <div class="search-bar">
+                <input type="text" id="search-npm" placeholder="Filter packages…" oninput="filterTable('npm')">
+                <span class="count" id="count-npm"></span>
+            </div>
+            <div id="npm-content"><div class="status"><span class="spinner"></span>Loading npm packages…</div></div>
+        </div>
+
+        <!-- dotnet Tools Panel -->
+        <div class="panel" id="panel-dotnet">
+            <div class="search-bar">
+                <input type="text" id="search-dotnet" placeholder="Filter tools…" oninput="filterTable('dotnet')">
+                <span class="count" id="count-dotnet"></span>
+            </div>
+            <div id="dotnet-content"><div class="status"><span class="spinner"></span>Loading dotnet tools…</div></div>
+        </div>
+
+        <!-- NuGet Cache Panel -->
+        <div class="panel" id="panel-nuget">
+            <div class="search-bar">
+                <input type="text" id="search-nuget" placeholder="Filter packages…" oninput="filterTable('nuget')">
+                <span class="count" id="count-nuget"></span>
+            </div>
+            <div id="nuget-content"><div class="status"><span class="spinner"></span>Loading NuGet cache…</div></div>
+        </div>
+    </main>
+
+    <script>
+        // ── Tab switching ────────────────────────────────────────────
+        function switchTab(el) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById('panel-' + el.dataset.panel).classList.add('active');
+        }
+
+        // ── Table filtering ──────────────────────────────────────────
+        function filterTable(section) {
+            const query = document.getElementById('search-' + section).value.toLowerCase();
+            const rows = document.querySelectorAll('#table-' + section + ' tbody tr');
+            let visible = 0;
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                const show = text.includes(query);
+                row.style.display = show ? '' : 'none';
+                if (show) visible++;
+            });
+            document.getElementById('count-' + section).textContent = visible + ' shown';
+        }
+
+        // ── Table sorting ────────────────────────────────────────────
+        function sortTable(tableId, colIdx) {
+            const table = document.getElementById(tableId);
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const th = table.querySelectorAll('th')[colIdx];
+            const asc = th.dataset.sort !== 'asc';
+
+            // Reset all headers
+            table.querySelectorAll('th').forEach(h => { h.dataset.sort = ''; h.textContent = h.textContent.replace(/ [↑↓]$/, ''); });
+
+            th.dataset.sort = asc ? 'asc' : 'desc';
+            th.textContent += asc ? ' ↑' : ' ↓';
+
+            rows.sort((a, b) => {
+                const aVal = a.cells[colIdx].textContent.trim().toLowerCase();
+                const bVal = b.cells[colIdx].textContent.trim().toLowerCase();
+                const aNum = parseFloat(aVal);
+                const bNum = parseFloat(bVal);
+                if (!isNaN(aNum) && !isNaN(bNum)) return asc ? aNum - bNum : bNum - aNum;
+                return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            });
+            rows.forEach(r => tbody.appendChild(r));
+        }
+
+        // ── Data fetching ────────────────────────────────────────────
+        async function fetchJSON(url) {
+            const resp = await fetch(url);
+            return resp.json();
+        }
+
+        async function loadSystem() {
+            try {
+                const data = await fetchJSON('/api/system-info');
+                const cards = [
+                    { label: 'OS', value: data.os },
+                    { label: 'Architecture', value: data.arch },
+                    { label: 'Machine', value: data.machineName },
+                    { label: 'User', value: data.userName },
+                    { label: '.NET Runtime', value: data.dotnetRuntime },
+                    { label: '.NET SDK', value: data.dotnetSdkVersion || 'not found' },
+                    { label: 'Node.js', value: data.nodeVersion || 'not found' },
+                    { label: 'npm', value: data.npmVersion || 'not found' },
+                    { label: 'npm Path', value: data.npmPath || '—' },
+                    { label: 'dotnet Path', value: data.dotnetPath || '—' },
+                ];
+                let html = '<div class="info-grid">';
+                cards.forEach(c => {
+                    html += `<div class="info-card"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`;
+                });
+                html += '</div>';
+
+                if (data.dotnetSdks && data.dotnetSdks.length > 0) {
+                    html += '<h3 style="font-size:14px;margin:16px 0 8px;color:var(--muted)">Installed .NET SDKs</h3>';
+                    html += '<table><thead><tr><th>SDK Version</th></tr></thead><tbody>';
+                    data.dotnetSdks.forEach(sdk => { html += `<tr><td>${sdk}</td></tr>`; });
+                    html += '</tbody></table>';
+                }
+
+                document.getElementById('system-content').innerHTML = html;
+                document.getElementById('badge-system').textContent = '✓';
+            } catch (e) {
+                document.getElementById('system-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+            }
+        }
+
+        async function loadNpm() {
+            try {
+                const data = await fetchJSON('/api/npm-globals');
+                if (data.error) throw new Error(data.error);
+                document.getElementById('badge-npm').textContent = data.count;
+                document.getElementById('count-npm').textContent = data.count + ' packages';
+
+                let html = '<table id="table-npm"><thead><tr>';
+                html += '<th onclick="sortTable(\'table-npm\',0)">Package</th>';
+                html += '<th onclick="sortTable(\'table-npm\',1)">Version</th>';
+                html += '</tr></thead><tbody>';
+                data.packages.forEach(p => {
+                    html += `<tr><td class="name">${p.name}</td><td class="version">${p.version}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                document.getElementById('npm-content').innerHTML = html;
+            } catch (e) {
+                document.getElementById('npm-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+                document.getElementById('badge-npm').textContent = '!';
+            }
+        }
+
+        async function loadDotnet() {
+            try {
+                const data = await fetchJSON('/api/dotnet-tools');
+                if (data.error) throw new Error(data.error);
+                document.getElementById('badge-dotnet').textContent = data.count;
+                document.getElementById('count-dotnet').textContent = data.count + ' tools';
+
+                let html = '<table id="table-dotnet"><thead><tr>';
+                html += '<th onclick="sortTable(\'table-dotnet\',0)">Tool</th>';
+                html += '<th onclick="sortTable(\'table-dotnet\',1)">Version</th>';
+                html += '<th onclick="sortTable(\'table-dotnet\',2)">Command</th>';
+                html += '</tr></thead><tbody>';
+                data.packages.forEach(p => {
+                    html += `<tr><td class="name">${p.name}</td><td class="version">${p.version}</td><td>${p.commands}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                document.getElementById('dotnet-content').innerHTML = html;
+            } catch (e) {
+                document.getElementById('dotnet-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+                document.getElementById('badge-dotnet').textContent = '!';
+            }
+        }
+
+        async function loadNuget() {
+            try {
+                const data = await fetchJSON('/api/nuget-cache');
+                if (data.error) throw new Error(data.error);
+                document.getElementById('badge-nuget').textContent = data.count;
+                document.getElementById('count-nuget').textContent = data.count + ' packages';
+
+                let html = '<table id="table-nuget"><thead><tr>';
+                html += '<th onclick="sortTable(\'table-nuget\',0)">Package</th>';
+                html += '<th onclick="sortTable(\'table-nuget\',1)">Latest Cached</th>';
+                html += '<th onclick="sortTable(\'table-nuget\',2)">Versions</th>';
+                html += '</tr></thead><tbody>';
+                data.packages.forEach(p => {
+                    html += `<tr><td class="name">${p.name}</td><td class="version">${p.latestCached}</td><td>${p.versionCount}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                document.getElementById('nuget-content').innerHTML = html;
+            } catch (e) {
+                document.getElementById('nuget-content').innerHTML = `<div class="status error">Failed to load: ${e.message}</div>`;
+                document.getElementById('badge-nuget').textContent = '!';
+            }
+        }
+
+        function refreshAll() {
+            // Reset to loading state
+            ['system-content', 'npm-content', 'dotnet-content', 'nuget-content'].forEach(id => {
+                document.getElementById(id).innerHTML = '<div class="status"><span class="spinner"></span>Loading…</div>';
+            });
+            ['badge-system', 'badge-npm', 'badge-dotnet', 'badge-nuget'].forEach(id => {
+                document.getElementById(id).textContent = '…';
+            });
+            loadSystem();
+            loadNpm();
+            loadDotnet();
+            loadNuget();
+            document.getElementById('lastRefresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
+        }
+
+        // Initial load
+        refreshAll();
+    </script>
+</body>
+</html>
